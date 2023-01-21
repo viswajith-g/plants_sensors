@@ -1,7 +1,7 @@
 /**********************************************************************************************************************************
 # Program to receive data from MKRWAN 1310
 # Author - Viswajith Govinda Rajan
-# Ver 2.0
+# Ver 2.1
 # Date - 1/13/2023
 #
 # This piece of code receives the data from all four air sensors attached to the MKRWAN, decodes and resolves 
@@ -19,13 +19,30 @@
 #include <SensirionI2CSen5x.h>
 #include <Wire.h>
 
-#define GAS_SENSOR A1   // pin for unnamed gas sensor
-#define HCHO_SENSOR A2  // pin for groove hcho sensor
+#define GAS_SENSOR A6   // pin for unnamed gas sensor
+#define HCHO_SENSOR A5  // pin for groove hcho sensor
 #define DEBUG 0         // definition to toggle debug mode
 #define R0_HCHO 38.35   // fixed value of the potentiometer on the Groove HCHO sensor
 #define R0_GAS 4.95     // fixed value of the potentiometer on the Gas Sensor (most inexpensive one)
 #define RPI 1
 // #define SENSIRION_I2C 0x69
+
+unsigned long startMillis;
+unsigned long currentMillis;
+const unsigned long pauseInterval = 4500;
+int value1 = 0;   // variable to store analog reading for unnamed gas sensor
+int value2 = 0;   // variable to store analog reading for groove hcho sensor
+
+// variables to store sensirion data below
+float massConcentrationPm1p0;
+float massConcentrationPm2p5;
+float massConcentrationPm4p0;
+float massConcentrationPm10p0;
+float ambientHumidity;
+float ambientTemperature;
+float vocIndex;
+float noxIndex;
+
 
 // The used commands use up to 48 bytes. On some Arduino's the default buffer
 // space is not large enough
@@ -78,7 +95,7 @@ void setup() {
 pinMode(GAS_SENSOR, INPUT);
 pinMode(HCHO_SENSOR, INPUT);
 
-Serial.begin(115200);     // initate serial communication with usb
+Serial.begin(115200);     // initate serial communication with usb/rpi
 Serial1.begin(9600);      // initate serial communication with ec_sense module
 
 Wire.begin();
@@ -94,125 +111,114 @@ if (error) {
     Serial.println(errorMessage);
 }
 
-    // Start Measurement
-    error = sen5x.startMeasurement();
-    if (error) {
-        Serial.print("Error trying to execute startMeasurement(): ");
-        errorToString(error, errorMessage, 256);
-        Serial.println(errorMessage);
-    }
+// Start Measurement
+error = sen5x.startMeasurement();
+if (error) {
+    Serial.print("Error trying to execute startMeasurement(): ");
+    errorToString(error, errorMessage, 256);
+    Serial.println(errorMessage);
+}
 
-delay(1000);
+delay(500);
+// startMillis = millis();
 }
 
 // this is the main loop
 void loop() {
 
-uint16_t error;
-char errorMessage[256];
-// put your main code here, to run repeatedly:
-int value1 = 0;   // variable to store analog reading for unnamed gas sensor
-int value2 = 0;   // variable to store analog reading for groove hcho sensor
+  // currentMillis = millis();
+  // if (currentMillis - startMillis >= pauseInterval){
+    uint16_t error;
+    char errorMessage[256];
+    value1 = analogRead(GAS_SENSOR);    // poll unnamed gas sensor
+    float gas = calculate_ppm(value1, R0_GAS);
+    int gas_value = float_to_int(gas);
+    byte_values gas_sensor = data_for_transmission(gas_value);
 
-// variables to store sensirion data below
-float massConcentrationPm1p0;
-float massConcentrationPm2p5;
-float massConcentrationPm4p0;
-float massConcentrationPm10p0;
-float ambientHumidity;
-float ambientTemperature;
-float vocIndex;
-float noxIndex;
+    value2 = analogRead(HCHO_SENSOR);   // poll groove hcho sensor
+    float hcho = calculate_ppm(value2, R0_HCHO);
+    int hcho_value = float_to_int(hcho);
+    byte_values hcho_sensor = data_for_transmission(hcho_value);
 
-value1 = analogRead(GAS_SENSOR);    // poll unnamed gas sensor
-float gas = calculate_ppm(value1, R0_GAS);
-int gas_value = float_to_int(gas);
-byte_values gas_sensor = data_for_transmission(gas_value);
+    Serial1.write(ec_command.ec_sense_payload, 9); // ask ec_sense sensor for its measurement. 
+    delay(500);                        // wait for 5 seconds because resolving the request might take some time. documentation mentioned <20s. 5s seems to work. 
 
-value2 = analogRead(HCHO_SENSOR);   // poll groove hcho sensor
-float hcho = calculate_ppm(value2, R0_HCHO);
-int hcho_value = float_to_int(hcho);
-byte_values hcho_sensor = data_for_transmission(hcho_value);
+    /* Check if data from ec_sense sensor is available. If it is, read it and store in a buffer. */
+    if (Serial1.available()){
+      int i = 0;
+      while (Serial1.available()) {     // when receive buffer has data
+        ec_sense_result[i++] = (byte)Serial1.read();
+      }
+    } 
 
-Serial1.write(ec_command.ec_sense_payload, 9); // ask ec_sense sensor for its measurement. 
-delay(1000);                        // wait for 5 seconds because resolving the request might take some time. documentation mentioned <20s. 5s seems to work. 
+  error = sen5x.readMeasuredValues( massConcentrationPm1p0, massConcentrationPm2p5, massConcentrationPm4p0, 
+                                    massConcentrationPm10p0, ambientHumidity, ambientTemperature, vocIndex, noxIndex);  // read sensirion data
 
-/* Check if data from ec_sense sensor is available. If it is, read it and store in a buffer. */
-if (Serial1.available()){
-  int i = 0;
-  while (Serial1.available()) {     // when receive buffer has data
-    ec_sense_result[i++] = (byte)Serial1.read();
-  }
-} 
+  int pm1p0 = float_to_int(massConcentrationPm1p0);
+  int pm2p5 = float_to_int(massConcentrationPm2p5);
+  int pm4p0 = float_to_int(massConcentrationPm4p0);
+  int pm10p0 = float_to_int(massConcentrationPm10p0);
+  int voc = float_to_int(vocIndex);
 
-error = sen5x.readMeasuredValues( massConcentrationPm1p0, massConcentrationPm2p5, massConcentrationPm4p0, 
-                                  massConcentrationPm10p0, ambientHumidity, ambientTemperature, vocIndex, noxIndex);  // read sensirion data
+  byte_values pm_1p0 = data_for_transmission(pm1p0);
+  byte_values pm_2p5 = data_for_transmission(pm2p5);
+  byte_values pm_4p0 = data_for_transmission(pm4p0);
+  byte_values pm_10p0 = data_for_transmission(pm10p0);
+  byte_values voc_index = data_for_transmission(voc);
 
-int pm1p0 = float_to_int(massConcentrationPm1p0);
-int pm2p5 = float_to_int(massConcentrationPm2p5);
-int pm4p0 = float_to_int(massConcentrationPm4p0);
-int pm10p0 = float_to_int(massConcentrationPm10p0);
-int voc = float_to_int(vocIndex);
-
-byte_values pm_1p0 = data_for_transmission(pm1p0);
-byte_values pm_2p5 = data_for_transmission(pm2p5);
-byte_values pm_4p0 = data_for_transmission(pm4p0);
-byte_values pm_10p0 = data_for_transmission(pm10p0);
-byte_values voc_index = data_for_transmission(voc);
-
-if (error) {
-  if (DEBUG){
+  if (error) {
     Serial.print("Error trying to execute readMeasuredValues(): ");
     errorToString(error, errorMessage, 256);
     Serial.println(errorMessage);
   }
-}
-/*********************************************************************************************/
+  /*********************************************************************************************/
 
-/***************** Print values on serial display ********************************************/
-if (DEBUG == 1 && RPI == 0) {
-Serial.print("Gas Sensor value (ppm): ");
-Serial.print(gas);
-Serial.print(", ");
-Serial.println((gas_sensor.high << 8 | gas_sensor.low));
-Serial.print("HCHO Sensor value (ppm): ");
-Serial.print(hcho);
-Serial.print(", ");
-Serial.println((hcho_sensor.high << 8 | hcho_sensor.low));
-Serial.print("EC Sense value (ppb): ");
-Serial.println(ec_sense_result[6] << 8 | ec_sense_result[7]);
-Serial.print("MassConcentrationPm1p0: ");
-Serial.print(massConcentrationPm1p0);
-Serial.print(", ");
-Serial.println((pm_1p0.high << 8 | pm_1p0.low));
-Serial.print("MassConcentrationPm2p5: ");
-Serial.print(massConcentrationPm2p5);
-Serial.print(", ");
-Serial.println((pm_2p5.high << 8 | pm_2p5.low));
-Serial.print("MassConcentrationPm4p0: ");
-Serial.print(massConcentrationPm4p0);
-Serial.print(", ");
-Serial.println((pm_4p0.high << 8 | pm_4p0.low));
-Serial.print("MassConcentrationPm10p0: ");
-Serial.print(massConcentrationPm10p0);
-Serial.print(", ");
-Serial.println((pm_10p0.high << 8 | pm_10p0.low));
-Serial.print("VocIndex: ");
-Serial.print(vocIndex);
-Serial.print(", ");
-Serial.println((voc_index.high << 8 | voc_index.low));
-}
-/*********************************************************************************************/
-
-if (RPI){
-  char payload[] = {gas_sensor.low, gas_sensor.high, hcho_sensor.low, hcho_sensor.high, ec_sense_result[7], ec_sense_result[6], pm_1p0.low, pm_1p0.high, pm_2p5.low, pm_2p5.high, pm_4p0.low, pm_4p0.high,
-                    pm_10p0.low, pm_10p0.high, voc_index.low, voc_index.high,'\n'};
-  Serial.write(payload, 17);
-  //Serial.write(">");  
-  // if (Serial.available() > 0) {
-  //   byte recv = (byte)Serial.read();
-  //   // if (recv == 0xA1){
-  //   }
+  /***************** Print values on serial display ********************************************/
+  if (DEBUG == 1 && RPI == 0) {
+  Serial.print("Gas Sensor value (ppm): ");
+  Serial.print(gas);
+  Serial.print(", ");
+  Serial.println((gas_sensor.high << 8 | gas_sensor.low));
+  Serial.print("HCHO Sensor value (ppm): ");
+  Serial.print(hcho);
+  Serial.print(", ");
+  Serial.println((hcho_sensor.high << 8 | hcho_sensor.low));
+  Serial.print("EC Sense value (ppb): ");
+  Serial.println(ec_sense_result[6] << 8 | ec_sense_result[7]);
+  Serial.print("MassConcentrationPm1p0: ");
+  Serial.print(massConcentrationPm1p0);
+  Serial.print(", ");
+  Serial.println((pm_1p0.high << 8 | pm_1p0.low));
+  Serial.print("MassConcentrationPm2p5: ");
+  Serial.print(massConcentrationPm2p5);
+  Serial.print(", ");
+  Serial.println((pm_2p5.high << 8 | pm_2p5.low));
+  Serial.print("MassConcentrationPm4p0: ");
+  Serial.print(massConcentrationPm4p0);
+  Serial.print(", ");
+  Serial.println((pm_4p0.high << 8 | pm_4p0.low));
+  Serial.print("MassConcentrationPm10p0: ");
+  Serial.print(massConcentrationPm10p0);
+  Serial.print(", ");
+  Serial.println((pm_10p0.high << 8 | pm_10p0.low));
+  Serial.print("VocIndex: ");
+  Serial.print(vocIndex);
+  Serial.print(", ");
+  Serial.println((voc_index.high << 8 | voc_index.low));
   }
-delay(1000);  // wait for a second before taking next reading. can change this value depending on how often we want to measure. need to add 5 seconds from the ec_sense reading request however. 
-}
+  /*********************************************************************************************/
+
+  if (RPI){
+    char payload[] = {gas_sensor.low, gas_sensor.high, hcho_sensor.low, hcho_sensor.high, ec_sense_result[7], ec_sense_result[6], pm_1p0.low, pm_1p0.high, pm_2p5.low, pm_2p5.high, pm_4p0.low, pm_4p0.high,
+                      pm_10p0.low, pm_10p0.high, voc_index.low, voc_index.high,'\n'};
+    Serial.write(payload, 17);
+    //Serial.write(">");  
+    // if (Serial.available() > 0) {
+    //   byte recv = (byte)Serial.read();
+    //   // if (recv == 0xA1){
+    //   }
+    }
+  // startMillis = currentMillis;
+  delay(500);  // wait for a second before taking next reading. can change this value depending on how often we want to measure. need to add 5 seconds from the ec_sense reading request however. 
+  //}
+} 
