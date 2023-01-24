@@ -219,6 +219,6 @@ void loop() {
     //   }
     }
   // startMillis = currentMillis;
-  delay(500);  // wait for a second before taking next reading. can change this value depending on how often we want to measure. need to add 5 seconds from the ec_sense reading request however. 
+  delay(4500);  // wait for a second before taking next reading. can change this value depending on how often we want to measure. need to add 5 seconds from the ec_sense reading request however. 
   //}
 } 
