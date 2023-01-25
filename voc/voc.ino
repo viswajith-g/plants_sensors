@@ -1,17 +1,20 @@
 /**********************************************************************************************************************************
-# Program to receive data from MKRWAN 1310
+# Program to aggregate sensor data and transfer to the RPi
 # Author - Viswajith Govinda Rajan
-# Ver 2.1
-# Date - 1/13/2023
+# Ver 2.2
+# Date - 1/24/2023
 #
-# This piece of code receives the data from all four air sensors attached to the MKRWAN, decodes and resolves 
-# it into a human readable format. The data from the sensors are as follows:
 # Unnamed gas sensor - (I applied the same principle as that of grove hcho sensor and compute the ppm)
 # Grove HCHO sensor - This sensor reports value in analog, this value is then resolved into ppm value
 # EC Sense - This sensor reports values in ppb
 # Sensirion SEN54 - This sensor reports PM1.0, PM2.5, PM4.0, PM10.0 and a VOC index ranging from 0 - 500
 # The readings from these four sensors are then sent to a raspberry pi where the data will be further ingested to an influx db
-# This sensor sends data once every two seconds.
+# This sensor sends data once every five seconds.
+# 
+# Patch notes - Added a communication control, i.e, the RPi first requests data after which the MKRWAN aggregates data from the 4 
+#               sensors and then sends it to the pi
+#             - Changed the communication baud rate to 9600 
+# Todo - SEN54 Fan clean operation
 ***********************************************************************************************************************************/
 
 
@@ -27,8 +30,6 @@
 #define RPI 1
 // #define SENSIRION_I2C 0x69
 
-unsigned long startMillis;
-unsigned long currentMillis;
 const unsigned long pauseInterval = 4500;
 int value1 = 0;   // variable to store analog reading for unnamed gas sensor
 int value2 = 0;   // variable to store analog reading for groove hcho sensor
@@ -87,48 +88,9 @@ int float_to_int(float val){
   int result = (int) (val * 100);
   return result;
 }
-// setup loop only runs once
-void setup() {
-// put your setup code here, to run once:
 
-/********* Set pin modes for the analog pins ***********/
-pinMode(GAS_SENSOR, INPUT);
-pinMode(HCHO_SENSOR, INPUT);
-
-Serial.begin(115200);     // initate serial communication with usb/rpi
-Serial1.begin(9600);      // initate serial communication with ec_sense module
-
-Wire.begin();
-
-sen5x.begin(Wire);
-
-uint16_t error;
-char errorMessage[256];
-error = sen5x.deviceReset();
-if (error) {
-    Serial.print("Error trying to execute deviceReset(): ");
-    errorToString(error, errorMessage, 256);
-    Serial.println(errorMessage);
-}
-
-// Start Measurement
-error = sen5x.startMeasurement();
-if (error) {
-    Serial.print("Error trying to execute startMeasurement(): ");
-    errorToString(error, errorMessage, 256);
-    Serial.println(errorMessage);
-}
-
-delay(500);
-// startMillis = millis();
-}
-
-// this is the main loop
-void loop() {
-
-  // currentMillis = millis();
-  // if (currentMillis - startMillis >= pauseInterval){
-    uint16_t error;
+void run(){
+   uint16_t error;
     char errorMessage[256];
     value1 = analogRead(GAS_SENSOR);    // poll unnamed gas sensor
     float gas = calculate_ppm(value1, R0_GAS);
@@ -212,13 +174,55 @@ void loop() {
     char payload[] = {gas_sensor.low, gas_sensor.high, hcho_sensor.low, hcho_sensor.high, ec_sense_result[7], ec_sense_result[6], pm_1p0.low, pm_1p0.high, pm_2p5.low, pm_2p5.high, pm_4p0.low, pm_4p0.high,
                       pm_10p0.low, pm_10p0.high, voc_index.low, voc_index.high,'\n'};
     Serial.write(payload, 17);
-    //Serial.write(">");  
-    // if (Serial.available() > 0) {
-    //   byte recv = (byte)Serial.read();
-    //   // if (recv == 0xA1){
-    //   }
     }
-  // startMillis = currentMillis;
-  delay(4500);  // wait for a second before taking next reading. can change this value depending on how often we want to measure. need to add 5 seconds from the ec_sense reading request however. 
-  //}
+    delay(4500);
+}
+
+// setup loop only runs once
+void setup() {
+// put your setup code here, to run once:
+
+/********* Set pin modes for the analog pins ***********/
+pinMode(GAS_SENSOR, INPUT);
+pinMode(HCHO_SENSOR, INPUT);
+
+Serial.begin(9600);     // initate serial communication with usb/rpi
+Serial1.begin(9600);      // initate serial communication with ec_sense module
+
+Wire.begin();
+
+sen5x.begin(Wire);
+
+uint16_t error;
+char errorMessage[256];
+error = sen5x.deviceReset();
+if (error) {
+    Serial.print("Error trying to execute deviceReset(): ");
+    errorToString(error, errorMessage, 256);
+    Serial.println(errorMessage);
+}
+
+// Start Measurement
+error = sen5x.startMeasurement();
+if (error) {
+    Serial.print("Error trying to execute startMeasurement(): ");
+    errorToString(error, errorMessage, 256);
+    Serial.println(errorMessage);
+}
+
+delay(500);
+}
+
+// this is the main loop
+void loop() {
+  // run();
+  if (Serial.available()){
+    String data = Serial.readStringUntil('\n');
+    if (data == "tx"){
+        run();  
+      }  
+    else {
+      if (DEBUG){ Serial.println("Wrong Command Sent");}
+    }
+  }
 } 

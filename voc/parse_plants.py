@@ -1,22 +1,24 @@
 #!/usr/bin/env python
+# coding=utf-8
 
 #################################################################################################################
 # Python program to receive data from MKRWAN 1310
 # Author - Viswajith Govinda Rajan
-# Ver 2.2
+# Ver 2.3
 # Date - 1/23/2023
 #
-# This piece of code receives the data from all four air sensors attached to the MKRWAN, decodes and resolves 
-# it into a human readable format. The data from the sensors are as follows:
+# This piece of code receives the data from all four sensors attached to the MKRWAN, decodes and publishes the 
+# data to MQTT broker from where it will be ingested by the influx platform. The four sensors are:
+#
 # Unnamed gas sensor - (I applied the same principle as that of grove hcho sensor and compute the ppm)
 # Grove HCHO sensor - This sensor reports value in analog, this value is then resolved into ppm value
 # EC Sense - This sensor reports values in ppb
-# Sensirion SEN54 - This sensor reports PM1.0, PM2.5, PM4.0, PM10.0 and a VOC index ranging from 0 - 500
+# Sensirion SEN54 - This sensor reports pm1.0, pm2.5, pm4.0, pm10.0 and a VOC index ranging from 0 - 500
 #
-# Publishes the data to MQTT broker from where it will be ingested by the influx platform
-#
-#
-# patch notes - the program now sends data to the influx database from where it can be queried successfully
+# patch notes 	- updated fields for sensor readings
+# 				- made pi the controller: the controller requests for data every 5 
+# 					seconds and the mkrwan supplies it with the data
+# 				- changed communication baud rate to 9600
 ####################################################################################################################
 
 import serial
@@ -26,56 +28,57 @@ import json
 import os
 import sys
 import csv
+import time
 
 def flags_init():
 	global debug_mqtt, debug_print, csv_header_flag, csv_active_flag
 	debug_mqtt = False			# flag to check json payload for mqtt
 	debug_print = False			# flag to print stuff for debug			
 	csv_header_flag = False		# flag to check if header has to be inserted for csv
-	csv_active_flag = False		# flag to check if csv part of the code has to be run
+	csv_active_flag = True		# flag to check if csv part of the code has to be run
 
 '''mqtt_init() initializes the parameters needed to make a connection with and publish data to the MQTT broker '''
 def mqtt_init():
 	global MQTT_TOPIC_NAME, MQTT_BROKER, MQTT_PORT, username, password, client_id
-	MQTT_TOPIC_NAME = 'gateway-data'
+	MQTT_TOPIC_NAME = ''
 	MQTT_BROKER = ''
 	MQTT_PORT = ''
 	username = ''
 	password = ''
-	client_id = 'RPI_001'
+	client_id = ''
 
 '''lists_and_dicts_init() initilalizes the lists and dictionary that contain the data from uart, decoded data, sensor data, etc.'''
-def lists_and_dicts_init():
+def lists_and_dicts_init(id):
 	global payload_resolved, payload_decoded, sensor_data, gas_dict, grove_dict, ps1_dict, sen54_dict
 	payload_resolved = [0] * 17		# list to store the incoming data from UART
 	payload_decoded = [0] * 16		# list to store the integer values. it is only 16 bytes instead of 17 because we have no use for the newline character
 	sensor_data = [0] * 8			# list to store the float values of the sensor readings
 	
 	gas_dict = {
-				"gas_sensor_ppm": 0.0,
-				"_meta": {"device_id" : "RPI_001", 
+				"voc_ppm": 0.0,
+				"_meta": {"device_id" : id, 
 							"sensor" : "Unnamed_gas_sensor"}
 	} 
 
 	grove_dict = {
-				"hcho_sensor_ppm": 0.0,
-				"_meta": {"device_id" : "RPI_001", 
-							"sensor" : "Grove_HCHO_sensor"}
+				"voc_ppm": 0.0,
+				"_meta": {"device_id" : id, 
+							"sensor" : "Seeed_Grove_HCHO_sensor"}
 	} 
 
 	ps1_dict = {
-				"ec_sense_ppb": 0.0,
-				"_meta": {"device_id" : "RPI_001", 
+				"voc_ppb": 0.0,
+				"_meta": {"device_id" : id, 
 							"sensor" : "EC_Sense_PS1_VOC"}
 	} 
 
 	sen54_dict = {
-				"PM_1.0": 0.0,
-				"PM_2.5": 0.0,
-				"PM_4.0": 0.0,
-				"PM_10.0": 0.0,
-				"VOC_Index": 0.0,
-				"_meta": {"device_id" : "RPI_001", 
+				"pm1.0_μg/m3": 0.0,
+				"pm2.5_μg/m3": 0.0,
+				"pm4.0_μg/m3": 0.0,
+				"pm10.0_μg/m3": 0.0,
+				"voc_index": 0.0,
+				"_meta": {"device_id" : id, 
 							"sensors" : "Sensirion_SEN54"}
 				}
 	
@@ -93,11 +96,9 @@ def detect_path():
 def path_check():
 	global path, csv_header_flag
 	cwd_path = os.path.realpath(os.path.join(os.getcwd(), detect_path()))
-	# print(cwd_path)
 	csv_abs_path = 'sensor_data.csv'
 	path = os.path.join(cwd_path, csv_abs_path)
 	path_exists = os.path.exists(path)
-	# print(path_exists)
 	if path_exists:
 		csv_header_flag = True
 	else:
@@ -118,8 +119,6 @@ def decode_payload(idx):
 			result[i] = 0
 		else:
 			result[i] = int(payload_resolved[i], 16)
-	if debug_print:
-		print("decode value: {}\n".format(result))
 	return result
 
 '''on_connect() is a built in paho-mqtt function that returns the status of the connection when a connect request is made'''
@@ -137,7 +136,6 @@ def mqtt_connect():
 	client.tls_set()
 	client.on_connect = on_connect
 	client.connect(MQTT_BROKER, MQTT_PORT, 60)
-	# print('connection attempt made\n')
 	return client
 
 '''mqtt_publish takes in the client object from mqtt_connect as an argument and publishes the message to said client'''
@@ -162,23 +160,22 @@ def write_to_csv(data1, data2, data3, data4):
 	with open (path, 'a') as logfile:
 		file = csv.writer(logfile)
 		if not csv_header_flag:
-			file.writerow(['Timestamp', 'Gas Sensor (PPM)', 'HCHO Sensor (PPM)', 'EC Sense (PPB)', 'PM 1.0 (ug/m3)', 'PM 2.5 (ug/m3)', 
-							'PM 4.0 (ug/m3)', 'PM 10.0 (ug/m3)', 'VOC Index (0-500)'])
-			file.writerow([datetime.datetime.now(), data1["gas_sensor_ppm"],data2['hcho_sensor_ppm'], data3['ec_sense_ppb'], data4['PM_1.0'], 
-							data4['PM_2.5'], data4['PM_4.0'], data4['PM_10.0'], data4['VOC_Index']])
+			file.writerow(['Timestamp', 'Unnamed Gas Sensor (PPM)', 'Grove HCHO Sensor (PPM)', 'EC Sense PS1  (PPB)', 'pm1.5 (μg/m3)', 'pm2.5 (μg/m3)', 
+							'pm4.0 (μg/m3)', 'pm10.0 (μg/m3)', 'VOC Index (0-500)'])
+			file.writerow([datetime.datetime.now(), data1["voc_ppm"],data2['voc_ppm'], data3['voc_ppb'], data4['pm1.0_μg/m3'], 
+							data4['pm2.5_μg/m3'], data4['pm4.0_μg/m3'], data4['pm10.0_μg/m3'], data4['voc_index']])
 			csv_header_flag = True
 		else:
-			file.writerow([datetime.datetime.now(), data1["gas_sensor_ppm"], data2['hcho_sensor_ppm'], data3['ec_sense_ppb'], data4['PM_1.0'], 
-							data4['PM_2.5'], data4['PM_4.0'], data4['PM_10.0'], data4['VOC_Index']])
+			file.writerow([datetime.datetime.now(), data1["voc_ppm"],data2['voc_ppm'], data3['voc_ppb'], data4['pm1.0_μg/m3'], 
+							data4['pm2.5_μg/m3'], data4['pm4.0_μg/m3'], data4['pm10.0_μg/m3'], data4['voc_index']])
 
 '''update_dictionaries(data) takes a list of sensor readings as input and updates the values of their respective dictionaries and converts it to JSON format
 	so it can be published'''
-def update_dictionaries(data):
-	global gas_dict, grove_dict, ps1_dict, sen54_dict
-	gas_dict.update({"gas_sensor_ppm": data[0]})
-	grove_dict.update({"hcho_sensor_ppm": data[1]})
-	ps1_dict.update({"ec_sense_ppb": data[2]})
-	sen54_dict.update({"PM_1.0": data[3], "PM_2.5": data[4], "PM_4.0": data[5], "PM_10.0": data[6], "VOC_Index": data[7]})
+def update_dictionaries(data, dict1, dict2, dict3, dict4):
+	gas_dict.update({"voc_ppm": data[0]})
+	grove_dict.update({"voc_ppm": data[1]})
+	ps1_dict.update({"voc_ppb": data[2]})
+	sen54_dict.update({"pm1.0_μg/m3": data[3], "pm2.5_μg/m3": data[4], "pm4.0_μg/m3": data[5], "pm10.0_μg/m3": data[6], "voc_index": data[7]})
 	
 	gas = json.dumps(gas_dict)
 	grove = json.dumps(grove_dict)
@@ -192,24 +189,23 @@ def update_dictionaries(data):
 if __name__ == '__main__':		# start the program
 
 	flags_init()
-	lists_and_dicts_init()
 	mqtt_init()
+	lists_and_dicts_init(client_id)
 	if csv_active_flag:			# check if csv file exists, given the csv flag is set
 		path_check()
-	ser = serial.Serial('/dev/serial/by-id/usb-Arduino_LLC_Arduino_MKR_WAN_1310_72F7C6B05055344E312E3120FF13322D-if00', 115200)		# setup the UART channel - had to call it this way or it kept breaking after a while if I used \dev\ttyACM0
+	ser = serial.Serial('/dev/serial/by-id/usb-Arduino_LLC_Arduino_MKR_WAN_1310_72F7C6B05055344E312E3120FF13322D-if00', 9600)		# setup the UART channel - had to call it this way or it kept breaking after a while if I used \dev\ttyACM0
+	# /dev/serial/by-id/usb-Arduino_LLC_Arduino_MKR_WAN_1310_72F7C6B05055344E312E3120FF13322D-if00
 	mqtt_client = mqtt_connect()
 	mqtt_client.loop_start()
+	transmit_prompt = "tx\n"
 	
 	while True:
+		ser.write(transmit_prompt.encode("utf-8"))
+		time.sleep(0.5)
 		payload = ser.readline()	# read UART line
-		# print(payload)
 		for vals in payload:
 			payload_resolved[payload.index(vals)] = hex(ord(vals))	# store the UART data into a list
 		payload_decoded = decode_payload(len(payload_resolved))
-		if debug_print:
-			print("original payload is: {}".format(payload))
-			print("decoded payload is: {}".format(payload_decoded))
-		# print(payload_resolved)
 
 		''' This block resolves the bytes of data into the actual sensor reading '''
 		sensor_data[0] = resolve_readings(payload_decoded[0], payload_decoded[1])		# gas_sensor
@@ -221,7 +217,7 @@ if __name__ == '__main__':		# start the program
 		sensor_data[6] = resolve_readings(payload_decoded[12], payload_decoded[13])		# pm 10.0
 		sensor_data[7] = resolve_readings(payload_decoded[14], payload_decoded[15])		# voc
 
-		gas_json, grove_json, ps1_json, sen54_json = update_dictionaries(sensor_data)
+		gas_json, grove_json, ps1_json, sen54_json = update_dictionaries(sensor_data, gas_dict, grove_dict, ps1_dict, sen54_dict)
 		mqtt_publish(mqtt_client, MQTT_TOPIC_NAME, gas_json, grove_json, ps1_json, sen54_json)
 
 		if debug_mqtt:
@@ -238,8 +234,11 @@ if __name__ == '__main__':		# start the program
 			print("Gas Sensor reading in ppm is: {}".format(sensor_data[0]))
 			print("HCHO Sensor reading in ppm is: {}".format(sensor_data[1]))
 			print("EC Sense reading in ppb is: {}".format(sensor_data[2]))
-			print("PM 1.0 reading in ug/m3 is: {}".format(sensor_data[3]))
-			print("PM 2.5 reading in ug/m3 is: {}".format(sensor_data[4]))
-			print("PM 4.0 reading in ug/m3 is: {}".format(sensor_data[5]))
-			print("PM 10.0 reading in ug/m3 is: {}".format(sensor_data[6]))
+			print("PM 1.0 reading in μg/m3 is: {}".format(sensor_data[3]))
+			print("PM 2.5 reading in μg/m3 is: {}".format(sensor_data[4]))
+			print("PM 4.0 reading in μg/m3 is: {}".format(sensor_data[5]))
+			print("PM 10.0 reading in μg/m3 is: {}".format(sensor_data[6]))
 			print("VOC index (0-500) is: {}".format(sensor_data[7]))
+		time.sleep(4)
+	mqtt_client.stop_loop()
+	mqtt_client.disconnect()
