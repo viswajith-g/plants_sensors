@@ -5,8 +5,8 @@ The idea of the codebase is to compare 4 different sensors manufactured by diffe
 The four sensors used in this case are - 
   1. A [Unbranded Gas Sensor](https://www.fruugo.us/hcho-vocs-sensor-gas-detection-sensor-module-detectors-0-1000ppm-ms1100/p-82360186-169946652?language=en&ac=google&utm_source=organic_shopping&utm_medium=organic) which sends data via an analog out pin. 
   2. A [Seeed Grove HCHO Sensor](https://www.digikey.com/en/products/detail/seeed-technology-co.,-ltd/101020001/5488087?utm_adgroup=Seeed%20Technology%20Co.%2C%20LTD.&utm_source=google&utm_medium=cpc&) which also sends data via an analog out pin.
-  3. A [SGX Sensortech PS1-VOC](https://www.digikey.com/en/products/detail/amphenol-sgx-sensortech/PS1-VOC-10-MOD/16634087) which had to be queried using a command via UART.
-  4. A [Sensirion SEN54](https://www.digikey.com/en/products/detail/sensirion-ag/SEN54-SDN-T/15903868) which had to be queried using a command via I2C.
+  3. A [SGX Sensortech PS1-VOC](https://www.digikey.com/en/products/detail/amphenol-sgx-sensortech/PS1-VOC-10-MOD/16634087) which has to be queried using a command via UART.
+  4. A [Sensirion SEN54](https://www.digikey.com/en/products/detail/sensirion-ag/SEN54-SDN-T/15903868) which has to be queried using a command via I2C.
 
 The controller board to aggregate the data from these four sensors was an arduino [MKRWAN 1310](https://www.digikey.com/en/products/detail/sensirion-ag/SEN54-SDN-T/15903868). The reason this board was chosen was because two fold, first - the choice of board, a raspberry pi does not have ADCs, so I chose to use an arduino board I had lying around. Second, I needed a board that could supply 5V to the SEN54 device. One could choose any arduino board of their choosing, but be mindful of the voltage levels between the devices (especially for the communication lines.) 
   
@@ -65,3 +65,5 @@ For the data handling and pushing to the cloud, I used a [RPi 3B+](https://www.c
         * The unnamed gas sensor's AOUT connects to A6 on the MKRWAN 1310
         * SCL and SDA on the SEN54 connect to the SCL and SDA of the MKRWAN 1310 respectively
         * The Tx of the PS1-VOC connects to the Rx of the MKRWAN 1310 and vice versa.
+  
+  In my case for the I2C, I did not need pull up resistors, or a voltage converter, because the MKRWAN 1310 board is 3v3 rated for communication, and the SEN54 board is 3V3 tolerant for the communication pins. The PS1-VOC board however is 3V3 rated on the UART lines, so if you are using a regular arduino board, please remember to use a bidirectional voltage converter!! I am also connecting to the RPi via USB serial, so I don't need any logic level shifters, however if you are using a regular arduino board which is 5V rated, and the UART pins on the RPi, you might need one. 
