@@ -9,6 +9,7 @@ The four sensors used in this case are -
   4. A [Sensirion SEN54](https://www.digikey.com/en/products/detail/sensirion-ag/SEN54-SDN-T/15903868) which had to be queried using a command via I2C.
 
 The controller board to aggregate the data from these four sensors was an arduino [MKRWAN 1310](https://www.digikey.com/en/products/detail/sensirion-ag/SEN54-SDN-T/15903868). The reason this board was chosen was because two fold, first - the choice of board, a raspberry pi does not have ADCs, so I chose to use an arduino board I had lying around. Second, I needed a board that could supply 5V to the SEN54 device. One could choose any arduino board of their choosing, but be mindful of the voltage levels between the devices (especially for the communication lines.) 
+  
   Note: Keep in mind, the MKRWAN 1310 does not supply 5V, it is merely connected to the USB 5V power line via a jumper, so if the MKRWAN device is not powered by USB, the 5V supply won't work. I tried powering the device with the RPi and running common ground with the MKRWAN 1310, but the communication did not work. 
 
 For the data handling and pushing to the cloud, I used a [RPi 3B+](https://www.canakit.com/raspberry-pi-3-model-b-plus.html?cid=usd&src=raspberrypi&src=raspberrypi) which runs the parse_plants python script to query the MKRWAN 1310 for the data from all four sensors every 5 seconds and then publishes it to a server from where, the data can be visualized on Grafana. 
