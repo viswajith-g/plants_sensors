@@ -175,7 +175,6 @@ void run(){
                       pm_10p0.low, pm_10p0.high, voc_index.low, voc_index.high,'\n'};
     Serial.write(payload, 17);
     }
-    delay(4500);
 }
 
 // setup loop only runs once
