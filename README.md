@@ -16,17 +16,17 @@ For the data handling and pushing to the cloud, I used a [RPi 3B+](https://www.c
 
 
 ## Requirements: 
-  For the arduino board:
-      1. Install the `Sensirion I2C SEN5X` library on arduino library manager. 
-      2. Use baud rate 9600 for the SGX Sensortech PS1-VOC device, that's the recommended speed on the datasheet. 
-      3. Even though the SEN54 device needs a 5V supply, it works with a 3V3 tolerable I2C line, so no need to pull it up to 5V. 
-      4. Remember that in case you are using the MKRWAN 1310 board, the board is rated for 3V3, meaning, the communication lines run on 3.3V, and so it should not be connected to 5V communication boards if both sides can take the lead on communication. 
-  
-  For the RPi:
-      1. `pip install paho-mqtt`
-      2. The mqtt package used in this code is [paho-mqtt](https://pypi.org/project/paho-mqtt/). 
-      3. In the code, I removed MQTT details, please use your own broker, topic, port, and credentials. 
-      Note: I had to use `client.tls_set()` before the client could connect to the broker and publish messages. If your code is not working, this could be something useful for you. 
+    For the arduino board:
+        1. Install the Sensirion I2C SEN5X library on arduino library manager. 
+        2. Use baud rate 9600 for the SGX Sensortech PS1-VOC device, that's the recommended speed on the datasheet. 
+        3. Even though the SEN54 device needs a 5V supply, it works with a 3V3 tolerable I2C line, so no need to pull it up to 5V. 
+        4. Remember that in case you are using the MKRWAN 1310 board, the board is rated for 3V3, meaning, the communication lines run on 3.3V, and so it should not be connected to 5V communication boards if both sides can take the lead on communication. 
+    
+    For the RPi:
+        1. pip install paho-mqtt
+        2. The mqtt package used in this code is [paho-mqtt](https://pypi.org/project/paho-mqtt/). 
+        3. In the code, I removed MQTT details, please use your own broker, topic, port, and credentials. 
+        Note: I had to use client.tls_set() before the client could connect to the broker and publish messages. If your code is not working, this could be something useful for you. 
     
 
 ## Connection Diagram 
